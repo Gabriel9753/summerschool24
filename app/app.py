@@ -1,4 +1,5 @@
 import streamlit as st
+import torch
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chains import ConversationalRetrievalChain
 from langchain.document_loaders import PyPDFLoader
@@ -8,6 +9,10 @@ from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
+from sentence_transformers import SentenceTransformer
+
+# MODEL_NAME = "gemma2:2b"
+MODEL_NAME = "llama3.1:8b"
 
 
 # Aufgabe 2: Indexing - PDF-Verarbeitung
@@ -32,10 +37,17 @@ def split_text(_documents):
 # Aufgabe 3: Embeddings
 @st.cache_resource
 def create_vectorstore(_chunks):
+    # Check if CUDA is available
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Initialize HuggingFaceEmbeddings with GPU support
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", model_kwargs={"device": device}
     )
+
+    # Create FAISS index
     vectorstore = FAISS.from_documents(_chunks, embeddings)
+
     return vectorstore
 
 
@@ -53,12 +65,9 @@ class StreamHandler(BaseCallbackHandler):
 # Aufgabe 4: Retrieval Pipeline
 @st.cache_resource
 def init_chatbot(_vectorstore):
-    # Note: We don't use StreamingStdOutCallbackHandler here anymore
-    llm = Ollama(model="gemma2:2b", temperature=0.4)
+    llm = Ollama(model=MODEL_NAME, temperature=0.5)
 
-    memory = ConversationBufferMemory(
-        memory_key="chat_history", return_messages=True, output_key="answer"
-    )
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, output_key="answer")
 
     # Enhanced system prompt
     template = """Du bist ein hilfreicher Assistent für das Tesla-Handbuch. Deine Aufgabe ist es, Fragen über Tesla-Fahrzeuge basierend auf dem offiziellen Handbuch zu beantworten.
@@ -75,9 +84,7 @@ def init_chatbot(_vectorstore):
     Menschliche Frage: {question}
     Assistenten-Antwort:"""
 
-    PROMPT = PromptTemplate(
-        input_variables=["context", "chat_history", "question"], template=template
-    )
+    PROMPT = PromptTemplate(input_variables=["context", "chat_history", "question"], template=template)
 
     qa_chain = ConversationalRetrievalChain.from_llm(
         llm,
@@ -91,9 +98,7 @@ def init_chatbot(_vectorstore):
 
 # Aufgabe 1: ChatUI
 def main():
-    st.set_page_config(
-        page_title="Tesla Handbuch Chatbot", page_icon="🚗", layout="wide"
-    )
+    st.set_page_config(page_title="Tesla Handbuch Chatbot", page_icon="🚗", layout="wide")
     st.title("Tesla Handbuch Chatbot 🚗")
 
     # Seitenleiste für Einstellungen
@@ -131,9 +136,7 @@ def main():
             # Ensure the final response is displayed without the cursor
             response_container.markdown(stream_handler.text)
 
-        st.session_state.messages.append(
-            {"role": "assistant", "content": stream_handler.text}
-        )
+        st.session_state.messages.append({"role": "assistant", "content": stream_handler.text})
 
         # Anzeigen der Quellen
         # if show_sources and "source_documents" in response:
